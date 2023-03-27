@@ -28,7 +28,7 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 	token := d.Get("token").(string)
 	var diags diag.Diagnostics
 	if token != "" {
-		c := ImgixClient{}
+		c := &ImgixClient{}
 		c.SetAuthToken(token)
 		return c, diags
 	}
