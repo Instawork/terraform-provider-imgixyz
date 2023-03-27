@@ -1,6 +1,8 @@
 package internal
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -66,8 +68,8 @@ type AuthenticatedTransport struct {
 
 func (mrt AuthenticatedTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	r.Header.Add("Authorization", "Bearer "+mrt.t)
-	r.Header.Add("Accept", "application/vnd.api+json")
-	r.Header.Add("Content-Type", "application/vnd.api+json")
+	r.Header.Add("Accept", jsonapi.MediaType)
+	r.Header.Add("Content-Type", jsonapi.MediaType)
 	return mrt.r.RoundTrip(r)
 }
 
@@ -92,4 +94,28 @@ func (c *ImgixClient) GetSourceByID(resourceId string) (*ImgixSource, error) {
 		return source, err
 	}
 	return source, nil
+}
+
+func (c *ImgixClient) CreateSource(source *ImgixSource) (*ImgixSource, error) {
+	payload, err := jsonapi.Marshal(source)
+	if err != nil {
+		return source, err
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return source, err
+	}
+	bodyReader := bytes.NewReader(b)
+	resp, err := c.client.Post(BASE_URL+"/api/v1/"+ImgixResourceSource+"/", jsonapi.MediaType, bodyReader)
+	if err != nil {
+		return source, err
+	}
+	if resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	remoteSource := new(ImgixSource)
+	if err := jsonapi.UnmarshalPayload(resp.Body, remoteSource); err != nil {
+		return remoteSource, err
+	}
+	return remoteSource, nil
 }

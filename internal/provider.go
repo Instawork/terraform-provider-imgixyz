@@ -16,7 +16,9 @@ func Provider() *schema.Provider {
 				DefaultFunc: schema.EnvDefaultFunc("IMGIX_TOKEN", nil),
 			},
 		},
-		ResourcesMap: map[string]*schema.Resource{},
+		ResourcesMap: map[string]*schema.Resource{
+			"imgixyz_source": resourceSource(),
+		},
 		DataSourcesMap: map[string]*schema.Resource{
 			"imgixyz_source": dataSourceSource(),
 		},
