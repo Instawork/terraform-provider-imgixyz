@@ -1,3 +1,4 @@
+# Grabbed from https://developer.hashicorp.com/terraform/registry/providers/publishing
 # Visit https://goreleaser.com for documentation on how to customize this
 # behavior.
 before:
