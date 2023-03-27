@@ -2,7 +2,6 @@ package internal
 
 import (
 	"context"
-	"strconv"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
@@ -27,7 +26,7 @@ func dataSourceSource() *schema.Resource {
 func dataSourceSourceRead(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	c := m.(*ImgixClient)
 	var diags diag.Diagnostics
-	sourceID := strconv.Itoa(d.Get("id").(int))
+	sourceID := d.Get("id").(string)
 	source, err := c.GetSourceByID(sourceID)
 	if err != nil {
 		return diag.FromErr(err)
