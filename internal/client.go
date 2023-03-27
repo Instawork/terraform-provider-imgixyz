@@ -10,9 +10,9 @@ import (
 const BASE_URL = "https://api.imgix.com/"
 
 const (
-	Source string = "sources"
-	Purge         = "purges"
-	Report        = "reports"
+	ImgixResourceSource string = "sources"
+	ImgixResourcePurge  string = "purges"
+	ImgixResourceReport string = "reports"
 )
 
 type ImgixSource struct {
@@ -81,7 +81,7 @@ func (c *ImgixClient) SetAuthToken(authToken string) {
 
 func (c *ImgixClient) GetSourceByID(resourceId string) (*ImgixSource, error) {
 	source := new(ImgixSource)
-	resp, err := c.client.Get(BASE_URL + "/api/v1/" + Source + "/" + resourceId)
+	resp, err := c.client.Get(BASE_URL + "/api/v1/" + ImgixResourceSource + "/" + resourceId)
 	if err != nil {
 		return source, err
 	}
