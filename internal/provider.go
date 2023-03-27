@@ -18,7 +18,7 @@ func Provider() *schema.Provider {
 		},
 		ResourcesMap: map[string]*schema.Resource{},
 		DataSourcesMap: map[string]*schema.Resource{
-			"imgix_source": dataSourceSource(),
+			"imgixyz_source": dataSourceSource(),
 		},
 		ConfigureContextFunc: providerConfigure,
 	}
