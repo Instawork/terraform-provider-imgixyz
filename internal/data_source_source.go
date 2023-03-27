@@ -17,7 +17,15 @@ func dataSourceSource() *schema.Resource {
 			},
 			"name": {
 				Type:     schema.TypeString,
-				Required: false,
+				Computed: true,
+			},
+			"deployment_status": {
+				Type:     schema.TypeString,
+				Computed: true,
+			},
+			"enabled": {
+				Type:     schema.TypeBool,
+				Computed: true,
 			},
 		},
 	}
@@ -33,5 +41,7 @@ func dataSourceSourceRead(ctx context.Context, d *schema.ResourceData, m interfa
 	}
 	d.SetId(sourceID)
 	d.Set("name", source.Name)
+	d.Set("deployment_status", source.DeploymentStatus)
+	d.Set("enabled", source.Enabled)
 	return diags
 }
