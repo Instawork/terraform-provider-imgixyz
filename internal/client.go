@@ -3,6 +3,7 @@ package internal
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -51,12 +52,6 @@ type ImgixSourceDeployment struct {
 	S3Prefix    string `jsonapi:"attr,s3_prefix"`
 }
 
-type Client interface {
-	SetAuthToken(authToken string)
-	GetSourceByID(resourceId string) (*ImgixSource, error)
-	CreateSource(source ImgixSource) (*ImgixSource, error)
-}
-
 type ImgixClient struct {
 	client http.Client
 }
@@ -83,12 +78,16 @@ func (c *ImgixClient) SetAuthToken(authToken string) {
 
 func (c *ImgixClient) GetSourceByID(resourceId string) (*ImgixSource, error) {
 	source := new(ImgixSource)
+	if resourceId == "" {
+		return source, fmt.Errorf("missing resourceId, can't call GetSourceByID")
+	}
 	resp, err := c.client.Get(BASE_URL + "/api/v1/" + ImgixResourceSource + "/" + resourceId)
 	if err != nil {
 		return source, err
 	}
 	if resp.Body != nil {
 		defer resp.Body.Close()
+
 	}
 	if err := jsonapi.UnmarshalPayload(resp.Body, source); err != nil {
 		return source, err

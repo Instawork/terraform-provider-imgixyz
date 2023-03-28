@@ -2,42 +2,95 @@ package internal
 
 import (
 	"context"
+	"os"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/provider"
+	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-func Provider() *schema.Provider {
-	return &schema.Provider{
-		Schema: map[string]*schema.Schema{
-			"token": {
-				Type:        schema.TypeString,
-				Optional:    true,
-				DefaultFunc: schema.EnvDefaultFunc("IMGIX_TOKEN", nil),
-			},
-		},
-		ResourcesMap: map[string]*schema.Resource{
-			"imgixyz_source": resourceSource(),
-		},
-		DataSourcesMap: map[string]*schema.Resource{
-			"imgixyz_source": dataSourceSource(),
-		},
-		ConfigureContextFunc: providerConfigure,
+func NewProvider(version string) func() provider.Provider {
+	return func() provider.Provider {
+		return &ImgixyzProvider{
+			Version: version,
+		}
 	}
 }
 
-func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}, diag.Diagnostics) {
-	token := d.Get("token").(string)
-	var diags diag.Diagnostics
-	if token != "" {
-		c := &ImgixClient{}
-		c.SetAuthToken(token)
-		return c, diags
+// Ensure the implementation satisfies the provider.Provider interface.
+var _ provider.Provider = &ImgixyzProvider{}
+
+type ImgixyzProvider struct {
+	// Version is an example field that can be set with an actual provider
+	// version on release, "dev" when the provider is built and ran locally,
+	// and "test" when running acceptance testing.
+	Version string
+}
+
+type ImgixyzProviderModel struct {
+	Token types.String `tfsdk:"token"`
+}
+
+// Metadata satisfies the provider.Provider interface for ImgixyzProvider
+func (p *ImgixyzProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
+	resp.TypeName = "imgixyz"
+}
+
+// Schema satisfies the provider.Provider interface for ImgixyzProvider.
+func (p *ImgixyzProvider) Schema(ctx context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
+	resp.Schema = schema.Schema{
+		Attributes: map[string]schema.Attribute{
+			"token": schema.StringAttribute{
+				Required: true,
+			},
+		},
 	}
-	diags = append(diags, diag.Diagnostic{
-		Severity: diag.Error,
-		Summary:  "Unable to create imgix client",
-		Detail:   "Unable to create an imgix client without a token provided",
-	})
-	return nil, diags
+}
+
+// Configure satisfies the provider.Provider interface for ImgixyzProvider.
+func (p *ImgixyzProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
+	token := os.Getenv("IMGIXYZ_TOKEN")
+	var data ImgixyzProviderModel
+
+	// Read configuration data into model
+	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
+
+	// Check configuration data, which should take precedence over
+	// environment variable data, if found.
+	if data.Token.ValueString() != "" {
+		token = data.Token.ValueString()
+	}
+
+	// Validate our token
+	if token == "" {
+		resp.Diagnostics.AddError(
+			"Missing Token Configuration",
+			"While configuring the provider, the token was not found in "+
+				"the IMGIXYZ_TOKEN environment variable or provider "+
+				"configuration block token attribute.",
+		)
+		// Not returning early allows the logic to collect all errors.
+	}
+
+	// Set our client on ResourceData to be accessed later
+	client := &ImgixClient{}
+	client.SetAuthToken(token)
+	resp.DataSourceData = client
+	resp.ResourceData = client
+}
+
+// DataSources satisfies the provider.Provider interface for ImgixyzProvider.
+func (p *ImgixyzProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
+	return []func() datasource.DataSource{
+		NewSourceDataSource,
+	}
+}
+
+// Resources satisfies the provider.Provider interface for ImgixyzProvider.
+func (p *ImgixyzProvider) Resources(ctx context.Context) []func() resource.Resource {
+	return []func() resource.Resource{
+		// Provider specific implementation
+	}
 }
