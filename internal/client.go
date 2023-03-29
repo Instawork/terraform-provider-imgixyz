@@ -2,15 +2,17 @@ package internal
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
 	"github.com/google/jsonapi"
 )
 
-const BASE_URL = "https://api.imgix.com/"
+const BASE_URL = "https://api.imgix.com/api/v1/"
 
 const (
 	ImgixResourceSource string = "sources"
@@ -19,37 +21,37 @@ const (
 )
 
 type ImgixSource struct {
-	ID               string                `jsonapi:"primary,sources"`
-	Name             string                `jsonapi:"attr,name"`
-	Enabled          bool                  `jsonapi:"attr,enabled"`
-	Deployment       ImgixSourceDeployment `jsonapi:"attr,deployment"`
-	DeploymentStatus string                `jsonapi:"attr,deployment_status"`
-	SecureURLToken   string                `jsonapi:"attr,secure_url_token"`
-	DateDeployed     int                   `jsonapi:"attr,date_deployed"`
+	ID               string                `jsonapi:"primary,sources,omitempty" json:"id,omitempty"`
+	Name             string                `jsonapi:"attr,name,omitempty" json:"name,omitempty"`
+	Enabled          *bool                 `jsonapi:"attr,enabled,omitempty" json:"enabled,omitempty"`
+	Deployment       ImgixSourceDeployment `jsonapi:"attr,deployment,omitempty" json:"deployment,omitempty"`
+	DeploymentStatus string                `jsonapi:"attr,deployment_status,omitempty" json:"deployment_status,omitempty"`
+	SecureURLToken   string                `jsonapi:"attr,secure_url_token,omitempty" json:"secure_url_token,omitempty"`
+	DateDeployed     int                   `jsonapi:"attr,date_deployed,omitempty" json:"date_deployed,omitempty"`
 }
 
 type ImgixSourceDeployment struct {
-	AllowsUpload          bool                   `jsonapi:"attr,allows_upload"`
-	Annotation            string                 `jsonapi:"attr,annotation"`
-	CacheTTLBehavior      string                 `jsonapi:"attr,cache_ttl_behavior"`
-	CacheTTLError         int                    `jsonapi:"attr,cache_ttl_error"`
-	CacheTTLValue         int                    `jsonapi:"attr,cache_ttl_value"`
-	CrossdomainXMLEnabled bool                   `jsonapi:"attr,crossdomain_xml_enabled"`
-	CustomDomains         []string               `jsonapi:"attr,custom_domains"`
-	DefaultParams         map[string]interface{} `jsonapi:"attr,default_params"`
-	ImageError            string                 `jsonapi:"attr,image_error"`
-	ImageErrorAppendQS    bool                   `jsonapi:"attr,image_error_append_qs"`
-	ImageMissing          string                 `jsonapi:"attr,image_missing"`
-	ImageMissingAppendQS  bool                   `jsonapi:"attr,image_missing_append_qs"`
-	ImgixSubdomains       []string               `jsonapi:"attr,imgix_subdomains"`
-	SecureURLEnabled      bool                   `jsonapi:"attr,secure_url_enabled"`
-	Type                  string                 `jsonapi:"attr,type"`
+	AllowsUpload          bool                   `jsonapi:"attr,allows_upload" json:"allows_upload,omitempty"`
+	Annotation            string                 `jsonapi:"attr,annotation" json:"annotation,omitempty"`
+	CacheTTLBehavior      string                 `jsonapi:"attr,cache_ttl_behavior" json:"cache_ttl_behavior,omitempty"`
+	CacheTTLError         int                    `jsonapi:"attr,cache_ttl_error" json:"cache_ttl_error,omitempty"`
+	CacheTTLValue         int                    `jsonapi:"attr,cache_ttl_value" json:"cache_ttl_value,omitempty"`
+	CrossdomainXMLEnabled bool                   `jsonapi:"attr,crossdomain_xml_enabled" json:"crossdomain_xml_enabled,omitempty"`
+	CustomDomains         []string               `jsonapi:"attr,custom_domains" json:"custom_domains,omitempty"`
+	DefaultParams         map[string]interface{} `jsonapi:"attr,default_params" json:"default_params,omitempty"`
+	ImageError            string                 `jsonapi:"attr,image_error" json:"image_error,omitempty"`
+	ImageErrorAppendQS    bool                   `jsonapi:"attr,image_error_append_qs" json:"image_error_append_qs,omitempty"`
+	ImageMissing          string                 `jsonapi:"attr,image_missing" json:"image_missing,omitempty"`
+	ImageMissingAppendQS  bool                   `jsonapi:"attr,image_missing_append_qs" json:"image_missing_append_qs,omitempty"`
+	ImgixSubdomains       []string               `jsonapi:"attr,imgix_subdomains" json:"imgix_subdomains,omitempty"`
+	SecureURLEnabled      bool                   `jsonapi:"attr,secure_url_enabled" json:"secure_url_enabled,omitempty"`
+	Type                  string                 `jsonapi:"attr,type" json:"type,omitempty"`
 
 	// AWS S3 Specific Fields
-	S3AccessKey string `jsonapi:"attr,s3_access_key"`
-	S3SecretKey string `jsonapi:"attr,s3_secret_key"`
-	S3Bucket    string `jsonapi:"attr,s3_bucket"`
-	S3Prefix    string `jsonapi:"attr,s3_prefix"`
+	S3AccessKey string  `jsonapi:"attr,s3_access_key" json:"s3_access_key,omitempty"`
+	S3SecretKey string  `jsonapi:"attr,s3_secret_key" json:"s3_secret_key,omitempty"`
+	S3Bucket    string  `jsonapi:"attr,s3_bucket" json:"s3_bucket,omitempty"`
+	S3Prefix    *string `jsonapi:"attr,s3_prefix" json:"s3_prefix,omitempty"`
 }
 
 type ImgixClient struct {
@@ -64,14 +66,15 @@ type AuthenticatedTransport struct {
 func (mrt AuthenticatedTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	r.Header.Add("Authorization", "Bearer "+mrt.t)
 	r.Header.Add("Accept", jsonapi.MediaType)
-	r.Header.Add("Content-Type", jsonapi.MediaType)
 	return mrt.r.RoundTrip(r)
 }
 
 func (c *ImgixClient) SetAuthToken(authToken string) {
+	cr := http.DefaultTransport.(*http.Transport).Clone()
+	cr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	client := &http.Client{
-		Timeout:   time.Second * 10,
-		Transport: AuthenticatedTransport{r: http.DefaultTransport, t: authToken},
+		Timeout:   time.Second * 30,
+		Transport: AuthenticatedTransport{r: cr, t: authToken},
 	}
 	c.client = *client
 }
@@ -81,7 +84,7 @@ func (c *ImgixClient) GetSourceByID(resourceId string) (*ImgixSource, error) {
 	if resourceId == "" {
 		return source, fmt.Errorf("missing resourceId, can't call GetSourceByID")
 	}
-	resp, err := c.client.Get(BASE_URL + "/api/v1/" + ImgixResourceSource + "/" + resourceId)
+	resp, err := c.client.Get(BASE_URL + ImgixResourceSource + "/" + resourceId)
 	if err != nil {
 		return source, err
 	}
@@ -89,8 +92,17 @@ func (c *ImgixClient) GetSourceByID(resourceId string) (*ImgixSource, error) {
 		defer resp.Body.Close()
 
 	}
+	reqBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return source, fmt.Errorf("failed to read body: %w", err)
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(reqBody))
 	if err := jsonapi.UnmarshalPayload(resp.Body, source); err != nil {
-		return source, err
+		if resp.StatusCode == 200 {
+			return nil, fmt.Errorf("failed to unmarshal jsonapi data: %w", err)
+		} else {
+			return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(reqBody))
+		}
 	}
 	return source, nil
 }
@@ -105,7 +117,7 @@ func (c *ImgixClient) CreateSource(source *ImgixSource) (*ImgixSource, error) {
 		return source, err
 	}
 	bodyReader := bytes.NewReader(b)
-	resp, err := c.client.Post(BASE_URL+"/api/v1/"+ImgixResourceSource+"/", jsonapi.MediaType, bodyReader)
+	resp, err := c.client.Post(BASE_URL+ImgixResourceSource, jsonapi.MediaType, bodyReader)
 	if err != nil {
 		return source, err
 	}
@@ -113,8 +125,94 @@ func (c *ImgixClient) CreateSource(source *ImgixSource) (*ImgixSource, error) {
 		defer resp.Body.Close()
 	}
 	remoteSource := new(ImgixSource)
+	reqBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return source, fmt.Errorf("failed to read body: %w", err)
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(reqBody))
 	if err := jsonapi.UnmarshalPayload(resp.Body, remoteSource); err != nil {
-		return remoteSource, err
+		if resp.StatusCode == 200 {
+			return nil, fmt.Errorf("failed to unmarshal jsonapi data: %w", err)
+		} else {
+			return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(reqBody))
+		}
 	}
 	return remoteSource, nil
+}
+
+func (c *ImgixClient) UpdateSource(source *ImgixSource) (*ImgixSource, error) {
+	if source.ID == "" {
+		return nil, fmt.Errorf("missing ID, can't call UpdateSource")
+	}
+	payload, err := jsonapi.Marshal(source)
+	if err != nil {
+		return nil, err
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader := bytes.NewReader(b)
+	req, err := http.NewRequest("PATCH", BASE_URL+ImgixResourceSource+"/"+source.ID, bodyReader)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Add("Content-Type", jsonapi.MediaType)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	remoteSource := new(ImgixSource)
+	reqBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return source, fmt.Errorf("failed to read body: %w", err)
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(reqBody))
+	if err := jsonapi.UnmarshalPayload(resp.Body, remoteSource); err != nil {
+		if resp.StatusCode == 200 {
+			return nil, fmt.Errorf("failed to unmarshal jsonapi data: %w", err)
+		} else {
+			return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(reqBody))
+		}
+	}
+	return remoteSource, nil
+}
+
+func (c *ImgixClient) DeleteSourceByID(resourceId string) error {
+	if resourceId == "" {
+		return fmt.Errorf("missing resourceId, can't call DeleteSourceByID")
+	}
+	f := false
+	payload, err := jsonapi.Marshal(&ImgixSource{ID: resourceId, Enabled: &f})
+	if err != nil {
+		return err
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	bodyReader := bytes.NewReader(b)
+	req, err := http.NewRequest("PATCH", BASE_URL+ImgixResourceSource+"/"+resourceId, bodyReader)
+	if err != nil {
+		return err
+	}
+	req.Header.Add("Content-Type", jsonapi.MediaType)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	if resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	reqBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read body: %w", err)
+	}
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(reqBody))
+	}
+	return nil
 }

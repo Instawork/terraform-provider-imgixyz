@@ -91,6 +91,6 @@ func (p *ImgixyzProvider) DataSources(ctx context.Context) []func() datasource.D
 // Resources satisfies the provider.Provider interface for ImgixyzProvider.
 func (p *ImgixyzProvider) Resources(ctx context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
-		// Provider specific implementation
+		NewSourceResource,
 	}
 }

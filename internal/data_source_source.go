@@ -7,8 +7,13 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
+
+const SECRET_KEY_PLACEHOLDER = "IMGIX_HIDES_KEYS"
 
 // With the datasource.DataSource implementation
 func NewSourceDataSource() datasource.DataSource {
@@ -22,25 +27,35 @@ type SourceDataSource struct {
 	client *ImgixClient
 }
 
-type SourceDataSourceModel struct {
-	ID               types.String `tfsdk:"id"`
-	Name             types.String `tfsdk:"name"`
-	Deployment       types.Object `tfsdk:"deployment"`
-	DeploymentStatus types.String `tfsdk:"deployment_status"`
-	Enabled          types.Bool   `tfsdk:"enabled"`
+type SourceModel struct {
+	ID         types.String     `tfsdk:"id"`
+	Name       types.String     `tfsdk:"name"`
+	Deployment *DeploymentModel `tfsdk:"deployment"`
+	Enabled    types.Bool       `tfsdk:"enabled"`
 }
 
-var deployObjectType = schema.ObjectAttribute{
-	Computed: true,
-	AttributeTypes: map[string]attr.Type{
-		"annotation":       types.StringType,
-		"type":             types.StringType,
-		"s3_bucket":        types.StringType,
-		"s3_prefix":        types.StringType,
-		"s3_access_key":    types.StringType,
-		"s3_secret_key":    types.StringType,
-		"imgix_subdomains": types.ListType{ElemType: types.StringType},
-	},
+type DeploymentModel struct {
+	Annotation      types.String `tfsdk:"annotation"`
+	Type            types.String `tfsdk:"type"`
+	S3Bucket        types.String `tfsdk:"s3_bucket"`
+	S3Prefix        types.String `tfsdk:"s3_prefix"`
+	S3AccessKey     types.String `tfsdk:"s3_access_key"`
+	S3SecretKey     types.String `tfsdk:"s3_secret_key"`
+	ImgixSubdomains types.List   `tfsdk:"imgix_subdomains"`
+}
+
+func dataDeployObjectType(computed, required bool) schema.Block {
+	return schema.SingleNestedBlock{
+		Attributes: map[string]schema.Attribute{
+			"annotation":       schema.StringAttribute{Required: required, Computed: computed},
+			"type":             schema.StringAttribute{Required: required, Computed: computed},
+			"s3_bucket":        schema.StringAttribute{Optional: required, Computed: computed},
+			"s3_prefix":        schema.StringAttribute{Optional: required, Computed: computed},
+			"s3_access_key":    schema.StringAttribute{Optional: required, Computed: computed},
+			"s3_secret_key":    schema.StringAttribute{Optional: required, Computed: computed},
+			"imgix_subdomains": schema.ListAttribute{ElementType: types.StringType, Required: required, Computed: computed},
+		},
+	}
 }
 
 func (d *SourceDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
@@ -66,11 +81,12 @@ func (d *SourceDataSource) Configure(ctx context.Context, req datasource.Configu
 func (d *SourceDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Attributes: map[string]schema.Attribute{
-			"id":                schema.StringAttribute{Required: true},
-			"name":              schema.StringAttribute{Computed: true},
-			"deployment":        deployObjectType,
-			"deployment_status": schema.StringAttribute{Computed: true},
-			"enabled":           schema.BoolAttribute{Computed: true},
+			"id":      schema.StringAttribute{Required: true},
+			"name":    schema.StringAttribute{Computed: true},
+			"enabled": schema.BoolAttribute{Computed: true},
+		},
+		Blocks: map[string]schema.Block{
+			"deployment": dataDeployObjectType(true, false),
 		},
 	}
 }
@@ -86,11 +102,19 @@ func (d *SourceDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 	}
 
 	// Read Terraform configuration data into the model
-	data := new(SourceDataSourceModel)
+	data := new(SourceModel)
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	// Read the deployment block
+	deployment := new(DeploymentModel)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("deployment"), deployment)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	data.Deployment = deployment
 
 	// Fetch our remote data
 	source, err := d.client.GetSourceByID(data.ID.ValueString())
@@ -99,33 +123,51 @@ func (d *SourceDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 		return
 	}
 
-	// Set domains
-	var imgixSubdomains []attr.Value
-	for _, a := range source.Deployment.ImgixSubdomains {
-		imgixSubdomains = append(imgixSubdomains, types.StringValue(a))
-	}
-
-	// Typically data sources will make external calls, however this example
-	// hardcodes setting the id attribute to a specific value for brevity.
-	data.ID = types.StringValue(source.ID)
-	data.Name = types.StringValue(source.Name)
-	data.Enabled = types.BoolValue(source.Enabled)
-	data.DeploymentStatus = types.StringValue(source.DeploymentStatus)
-	deployment, diag := types.ObjectValue(deployObjectType.AttributeTypes, map[string]attr.Value{
-		"type":             types.StringValue(source.Deployment.Type),
-		"annotation":       types.StringValue(source.Deployment.Annotation),
-		"s3_bucket":        types.StringValue(source.Deployment.S3Bucket),
-		"s3_prefix":        types.StringValue(source.Deployment.S3Prefix),
-		"s3_access_key":    types.StringValue(source.Deployment.S3AccessKey),
-		"s3_secret_key":    types.StringValue(source.Deployment.S3SecretKey),
-		"imgix_subdomains": types.ListValueMust(types.StringType, imgixSubdomains),
-	})
-	data.Deployment = deployment
+	// Convert our remote data into our local model
+	state := new(SourceModel)
+	diag := convertSourceToSourceModel(ctx, source, data, state)
 	resp.Diagnostics.Append(diag...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
 	// Set the state
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+func convertSourceToSourceModel(ctx context.Context, source *ImgixSource, readSourceModel, targetSourceModel *SourceModel) diag.Diagnostics {
+	targetSourceModel.ID = types.StringValue(source.ID)
+	targetSourceModel.Name = types.StringValue(source.Name)
+	targetSourceModel.Enabled = types.BoolValue(*source.Enabled)
+
+	// Set domains
+	var imgixSubdomains []attr.Value
+	for _, a := range source.Deployment.ImgixSubdomains {
+		imgixSubdomains = append(imgixSubdomains, types.StringValue(a))
+	}
+	subdomains, diag := types.ListValue(types.StringType, imgixSubdomains)
+	if diag.HasError() {
+		return diag
+	}
+
+	// Set deployment
+	targetSourceModel.Deployment = &DeploymentModel{
+		Type:            types.StringValue(source.Deployment.Type),
+		Annotation:      types.StringValue(source.Deployment.Annotation),
+		S3Bucket:        types.StringValue(source.Deployment.S3Bucket),
+		S3AccessKey:     types.StringValue(source.Deployment.S3AccessKey),
+		S3Prefix:        types.StringPointerValue(source.Deployment.S3Prefix),
+		ImgixSubdomains: subdomains,
+	}
+
+	// Imgix won't return the s3_secret_key after creation so we need to stick a fake value in there
+	if source.Deployment.S3SecretKey != "" {
+		tflog.Debug(ctx, "setting s3_secret_key from remote source")
+		targetSourceModel.Deployment.S3SecretKey = types.StringValue(source.Deployment.S3SecretKey)
+	} else {
+		tflog.Debug(ctx, "s3_secret_key isn't returned, setting value to unknown")
+		targetSourceModel.Deployment.S3SecretKey = types.StringValue(SECRET_KEY_PLACEHOLDER)
+	}
+
+	return nil
 }
