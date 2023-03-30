@@ -52,8 +52,8 @@ func dataDeployObjectType(computed, required bool) schema.Block {
 			"type":             schema.StringAttribute{Required: required, Computed: computed},
 			"s3_bucket":        schema.StringAttribute{Optional: required, Computed: computed},
 			"s3_prefix":        schema.StringAttribute{Optional: required, Computed: computed},
-			"s3_access_key":    schema.StringAttribute{Optional: required, Computed: computed},
-			"s3_secret_key":    schema.StringAttribute{Optional: required, Computed: computed},
+			"s3_access_key":    schema.StringAttribute{Optional: required, Computed: computed, Sensitive: true},
+			"s3_secret_key":    schema.StringAttribute{Optional: required, Computed: computed, Sensitive: true},
 			"imgix_subdomains": schema.ListAttribute{ElementType: types.StringType, Required: required, Computed: computed},
 		},
 	}

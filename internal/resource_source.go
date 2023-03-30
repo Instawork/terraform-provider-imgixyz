@@ -29,15 +29,20 @@ type SourceResource struct {
 func resourceDeployObjectType(computed, required bool) schema.Block {
 	return schema.SingleNestedBlock{
 		Attributes: map[string]schema.Attribute{
-			"annotation":    schema.StringAttribute{Required: required, Computed: computed},
-			"type":          schema.StringAttribute{Required: required, Computed: computed},
-			"s3_bucket":     schema.StringAttribute{Optional: required, Computed: computed},
-			"s3_prefix":     schema.StringAttribute{Optional: required, Computed: computed},
-			"s3_access_key": schema.StringAttribute{Optional: required, Computed: computed},
+			"annotation": schema.StringAttribute{Required: required, Computed: computed},
+			"type":       schema.StringAttribute{Required: required, Computed: computed},
+			"s3_bucket":  schema.StringAttribute{Optional: required, Computed: computed},
+			"s3_prefix":  schema.StringAttribute{Optional: required, Computed: computed},
+			"s3_access_key": schema.StringAttribute{
+				Optional:  required,
+				Computed:  computed,
+				Sensitive: true,
+			},
 			"s3_secret_key": schema.StringAttribute{
 				Optional:      required,
 				Computed:      computed,
 				PlanModifiers: []planmodifier.String{UseStateAfterSetModifier()},
+				Sensitive:     true,
 			},
 			"imgix_subdomains": schema.ListAttribute{ElementType: types.StringType, Required: required, Computed: computed},
 		},
