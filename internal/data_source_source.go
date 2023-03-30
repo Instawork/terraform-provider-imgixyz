@@ -157,8 +157,12 @@ func convertSourceToSourceModel(ctx context.Context, source *ImgixSource, readSo
 		Annotation:      types.StringValue(source.Deployment.Annotation),
 		S3Bucket:        types.StringValue(source.Deployment.S3Bucket),
 		S3AccessKey:     types.StringValue(source.Deployment.S3AccessKey),
-		S3Prefix:        types.StringPointerValue(source.Deployment.S3Prefix),
 		ImgixSubdomains: subdomains,
+	}
+
+	// Set optional fields
+	if source.Deployment.S3Prefix != nil && *source.Deployment.S3Prefix != "" {
+		targetSourceModel.Deployment.S3Prefix = types.StringValue(*source.Deployment.S3Prefix)
 	}
 
 	// Imgix won't return the s3_secret_key after creation so we need to stick a fake value in there
