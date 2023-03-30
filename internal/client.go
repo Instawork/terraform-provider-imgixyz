@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"time"
 
 	"github.com/google/jsonapi"
@@ -55,7 +56,8 @@ type ImgixSourceDeployment struct {
 }
 
 type ImgixClient struct {
-	client http.Client
+	client       http.Client
+	upsertByName bool
 }
 
 type AuthenticatedTransport struct {
@@ -105,6 +107,38 @@ func (c *ImgixClient) GetSourceByID(resourceId string) (*ImgixSource, error) {
 		}
 	}
 	return source, nil
+}
+
+func (c *ImgixClient) GetSourceByName(sourceName string) (*ImgixSource, error) {
+	if sourceName == "" {
+		return nil, fmt.Errorf("missing sourceName, can't call GetSourceByName")
+	}
+	resp, err := c.client.Get(BASE_URL + ImgixResourceSource + "?filter[name]=" + sourceName)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	reqBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read body: %w", err)
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(reqBody))
+	sources, err := jsonapi.UnmarshalManyPayload(resp.Body, reflect.TypeOf(new(ImgixSource)))
+	if err != nil {
+		if resp.StatusCode == 200 {
+			return nil, fmt.Errorf("failed to unmarshal jsonapi data: %w", err)
+		} else {
+			return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(reqBody))
+		}
+	}
+	if len(sources) == 0 {
+		return nil, nil
+	} else if len(sources) == 1 {
+		return sources[0].(*ImgixSource), nil
+	}
+	return nil, fmt.Errorf("more than one source was found with name: %s; can't import", sourceName)
 }
 
 func (c *ImgixClient) CreateSource(source *ImgixSource) (*ImgixSource, error) {

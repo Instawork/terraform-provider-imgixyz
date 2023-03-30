@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -164,6 +165,11 @@ func convertSourceToSourceModel(ctx context.Context, source *ImgixSource, readSo
 	if source.Deployment.S3SecretKey != "" {
 		tflog.Debug(ctx, "setting s3_secret_key from remote source")
 		targetSourceModel.Deployment.S3SecretKey = types.StringValue(source.Deployment.S3SecretKey)
+	} else if readSourceModel.Deployment != nil && readSourceModel.Deployment.S3SecretKey.ValueString() != "" {
+		tflog.Debug(ctx, "s3_secret_key is set during create, setting value to local one")
+		// NOTE: There is a bug in UnmarshalManyPayload that quotes our string
+		value := strings.ReplaceAll(readSourceModel.Deployment.S3SecretKey.String(), "\"", "")
+		targetSourceModel.Deployment.S3SecretKey = types.StringValue(value)
 	} else {
 		tflog.Debug(ctx, "s3_secret_key isn't returned, setting value to unknown")
 		targetSourceModel.Deployment.S3SecretKey = types.StringValue(SECRET_KEY_PLACEHOLDER)

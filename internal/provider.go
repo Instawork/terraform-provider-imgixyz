@@ -30,7 +30,8 @@ type ImgixyzProvider struct {
 }
 
 type ImgixyzProviderModel struct {
-	Token types.String `tfsdk:"token"`
+	Token        types.String `tfsdk:"token"`
+	UpsertByName types.Bool   `tfsdk:"upsert_by_name"`
 }
 
 // Metadata satisfies the provider.Provider interface for ImgixyzProvider
@@ -44,6 +45,9 @@ func (p *ImgixyzProvider) Schema(ctx context.Context, req provider.SchemaRequest
 		Attributes: map[string]schema.Attribute{
 			"token": schema.StringAttribute{
 				Required: true,
+			},
+			"upsert_by_name": schema.BoolAttribute{
+				Optional: true,
 			},
 		},
 	}
@@ -77,6 +81,7 @@ func (p *ImgixyzProvider) Configure(ctx context.Context, req provider.ConfigureR
 	// Set our client on ResourceData to be accessed later
 	client := &ImgixClient{}
 	client.SetAuthToken(token)
+	client.upsertByName = data.UpsertByName.ValueBool()
 	resp.DataSourceData = client
 	resp.ResourceData = client
 }

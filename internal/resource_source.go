@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
 // With the resource.Resource implementation
@@ -99,23 +100,63 @@ func (r SourceResource) Create(ctx context.Context, req resource.CreateRequest, 
 	}
 
 	// Convert from Terraform data model into API data model
-	source := new(ImgixSource)
-	diags := convertSourceModelToSource(ctx, data, source)
+	localSource := new(ImgixSource)
+	diags := convertSourceModelToSource(ctx, data, localSource)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
+	// If upsert_by_name = true, try to "create" an existing resource by syncing state
+	// and updating enabled = true
+	var source *ImgixSource
+	if r.client.upsertByName {
+		tflog.Debug(ctx, "Using the source name to try to find an existing resource")
+		s, err := r.client.GetSourceByName(data.Name.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Unable to Upsert Resource",
+				"An unexpected error occurred while creating the resource. "+
+					"Please report this issue to the provider developers.\n\n"+
+					"Client Error: "+err.Error(),
+			)
+			return
+		}
+		source = s
+	}
+
 	// Call out to our api and create the resource
-	source, err := r.client.CreateSource(source)
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Unable to Create Resource",
-			"An unexpected error occurred while creating the resource. "+
-				"Please report this issue to the provider developers.\n\n"+
-				"Client Error: "+err.Error(),
+	if source == nil {
+		s, err := r.client.CreateSource(localSource)
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Unable to Create Resource",
+				"An unexpected error occurred while creating the resource. "+
+					"Please report this issue to the provider developers.\n\n"+
+					"Client Error: "+err.Error(),
+			)
+			return
+		}
+		source = s
+	} else {
+		resp.Diagnostics.AddWarning(
+			"Found Existing Resource",
+			"Imgix doesn't allow deletion of sources but we found an existing source by name and `upsert_by_name = true`.\n"+
+				"We've imported the existing resource and have updated the source with any changed attributes.",
 		)
-		return
+		// Update our data in remote to sync with what we imported
+		localSource.ID = source.ID
+		s, err := r.client.UpdateSource(localSource)
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Unable to Sync Existing Resource",
+				"An unexpected error occurred while creating the resource create request. "+
+					"Please report this issue to the provider developers.\n\n"+
+					"Client Error: "+err.Error(),
+			)
+			return
+		}
+		source = s
 	}
 
 	// Convert our remote struct into our terraform model
@@ -170,6 +211,11 @@ func (r *SourceResource) Read(ctx context.Context, req resource.ReadRequest, res
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
+func updateSourceEnabledAttribute(client *ImgixClient, sourceID string, enabled bool) error {
+	_, err := client.UpdateSource(&ImgixSource{ID: sourceID, Enabled: &enabled})
+	return err
+}
+
 func (r SourceResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	// Prevent panic if the provider has not been configured.
 	if r.client == nil {
@@ -203,9 +249,48 @@ func (r SourceResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		return
 	}
 
+	// Imgix won't allow updates to a disabled source, gather the state and determine the actions
+	enabledState := oldState.Enabled.ValueBoolPointer()
+	enabledPlan := plan.Enabled.ValueBool()
+	currentlyDisabled := enabledState != nil && !*enabledState
+	isUpdatingDisabledSource := currentlyDisabled && !enabledPlan
+	shouldUpdateThenEnable := currentlyDisabled && enabledPlan
+	enabledPlanPtr := plan.Enabled.ValueBoolPointer()
+	shouldUpdateThenDisable := oldState.Enabled.ValueBool() && enabledPlanPtr != nil && !*enabledPlanPtr
+
+	// Don't allow updating fields unless we are already enabled or setting `enabled = true`
+	if isUpdatingDisabledSource {
+		resp.Diagnostics.AddError(
+			"Unable to Update Resource When Disabled",
+			"Imgix doesn't allow updates to attributes when `enabled = false`, this is a no-op.\n"+
+				"Please set `enabled = true` to update any attributes.",
+		)
+		return
+	}
+
+	// We need to enable the source first, then update attributes because Imgix doesn't allow updates to a disabled source
+	if shouldUpdateThenEnable {
+		err := updateSourceEnabledAttribute(r.client, source.ID, true)
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Unable to Enable Resource",
+				"An unexpected error occurred while enabling the resource during update request. "+
+					"Please report this issue to the provider developers.\n\n"+
+					"Client Error: "+err.Error(),
+			)
+			return
+		}
+	}
+
 	// Don't pass down our placeholder to update
 	if source.Deployment.S3SecretKey == SECRET_KEY_PLACEHOLDER {
 		source.Deployment.S3SecretKey = ""
+	}
+
+	// We have to update our data before we disable if we have other things planned, so set `enabled = true` for now
+	if shouldUpdateThenDisable {
+		b := true
+		source.Enabled = &b
 	}
 
 	// Update our data in remote
@@ -218,6 +303,20 @@ func (r SourceResource) Update(ctx context.Context, req resource.UpdateRequest, 
 				"Client Error: "+err.Error(),
 		)
 		return
+	}
+
+	// Now that we've update the attributes, we can disable the source
+	if shouldUpdateThenDisable {
+		err := updateSourceEnabledAttribute(r.client, source.ID, false)
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Unable to Enable Resource",
+				"An unexpected error occurred while disabling the resource during update request. "+
+					"Please report this issue to the provider developers.\n\n"+
+					"Client Error: "+err.Error(),
+			)
+			return
+		}
 	}
 
 	// Fetch our remote data again to be safe
@@ -273,6 +372,7 @@ func convertSourceModelToSource(ctx context.Context, sourceModel *SourceModel, t
 	if sourceModel.ID.ValueString() != "" {
 		targetSource.ID = sourceModel.ID.ValueString()
 	}
+	targetSource.Enabled = sourceModel.Enabled.ValueBoolPointer()
 	targetSource.Name = sourceModel.Name.ValueString()
 	targetSource.Deployment.Type = sourceModel.Deployment.Type.ValueString()
 	targetSource.Deployment.Annotation = sourceModel.Deployment.Annotation.ValueString()
