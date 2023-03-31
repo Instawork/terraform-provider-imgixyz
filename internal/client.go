@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/jsonapi"
+	"golang.org/x/time/rate"
 )
 
 const BASE_URL = "https://api.imgix.com/api/v1/"
@@ -60,25 +61,36 @@ type ImgixClient struct {
 	upsertByName bool
 }
 
-type AuthenticatedTransport struct {
-	r http.RoundTripper
-	t string
-}
-
-func (mrt AuthenticatedTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	r.Header.Add("Authorization", "Bearer "+mrt.t)
-	r.Header.Add("Accept", jsonapi.MediaType)
-	return mrt.r.RoundTrip(r)
-}
-
-func (c *ImgixClient) SetAuthToken(authToken string) {
+func NewImgixClient(authToken string, upsertByName bool) *ImgixClient {
 	cr := http.DefaultTransport.(*http.Transport).Clone()
 	cr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	client := &http.Client{
-		Timeout:   time.Second * 30,
-		Transport: AuthenticatedTransport{r: cr, t: authToken},
+		Timeout: time.Second * 30,
+		Transport: AuthenticatedRateLimitedTransport{
+			roundTripper: cr,
+			rateLimiter:  rate.NewLimiter(rate.Every(1*time.Second), 1), // 1 request(s) per second
+			token:        authToken,
+		},
 	}
-	c.client = *client
+	return &ImgixClient{client: *client, upsertByName: upsertByName}
+}
+
+type AuthenticatedRateLimitedTransport struct {
+	roundTripper http.RoundTripper
+	rateLimiter  *rate.Limiter
+	token        string
+}
+
+func (mrt AuthenticatedRateLimitedTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	// Use our RateLimiter
+	err := mrt.rateLimiter.Wait(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	// Set proper headers
+	r.Header.Add("Authorization", "Bearer "+mrt.token)
+	r.Header.Add("Accept", jsonapi.MediaType)
+	return mrt.roundTripper.RoundTrip(r)
 }
 
 func (c *ImgixClient) GetSourceByID(resourceId string) (*ImgixSource, error) {

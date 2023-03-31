@@ -79,9 +79,7 @@ func (p *ImgixyzProvider) Configure(ctx context.Context, req provider.ConfigureR
 	}
 
 	// Set our client on ResourceData to be accessed later
-	client := &ImgixClient{}
-	client.SetAuthToken(token)
-	client.upsertByName = data.UpsertByName.ValueBool()
+	client := NewImgixClient(token, data.UpsertByName.ValueBool())
 	resp.DataSourceData = client
 	resp.ResourceData = client
 }
