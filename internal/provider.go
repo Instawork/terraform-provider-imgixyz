@@ -44,10 +44,12 @@ func (p *ImgixyzProvider) Schema(ctx context.Context, req provider.SchemaRequest
 	resp.Schema = schema.Schema{
 		Attributes: map[string]schema.Attribute{
 			"token": schema.StringAttribute{
-				Required: true,
+				Required:            true,
+				MarkdownDescription: "Imgix API Token which can be created on <https://dashboard.imgix.com/api-keys>",
 			},
 			"upsert_by_name": schema.BoolAttribute{
-				Optional: true,
+				Optional:            true,
+				MarkdownDescription: "Imgix does not support deleting a source. Therefore, enabling this will import existing source(s) by the name attribute during create.",
 			},
 		},
 	}
