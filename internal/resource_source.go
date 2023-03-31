@@ -117,7 +117,7 @@ func (r SourceResource) Create(ctx context.Context, req resource.CreateRequest, 
 	var source *ImgixSource
 	if r.client.upsertByName {
 		tflog.Debug(ctx, "Using the source name to try to find an existing resource")
-		s, err := r.client.GetSourceByName(data.Name.ValueString())
+		s, err := r.client.GetSourceByName(ctx, data.Name.ValueString())
 		if err != nil {
 			resp.Diagnostics.AddError(
 				"Unable to Upsert Resource",
@@ -132,7 +132,7 @@ func (r SourceResource) Create(ctx context.Context, req resource.CreateRequest, 
 
 	// Call out to our api and create the resource
 	if source == nil {
-		s, err := r.client.CreateSource(localSource)
+		s, err := r.client.CreateSource(ctx, localSource)
 		if err != nil {
 			resp.Diagnostics.AddError(
 				"Unable to Create Resource",
@@ -149,9 +149,24 @@ func (r SourceResource) Create(ctx context.Context, req resource.CreateRequest, 
 			"Imgix doesn't allow deletion of sources but we found an existing source by name and `upsert_by_name = true`.\n"+
 				"We've imported the existing resource and have updated the source with any changed attributes.",
 		)
+
+		// Check if we need to update first (switching from disabled to enabled)
+		if *localSource.Enabled && !*source.Enabled {
+			err := updateSourceEnabledAttribute(ctx, r.client, source.ID, true)
+			if err != nil {
+				resp.Diagnostics.AddError(
+					"Unable to Sync Existing Resource",
+					"An unexpected error occurred while enabling the resource before the create request. "+
+						"Please report this issue to the provider developers.\n\n"+
+						"Client Error: "+err.Error(),
+				)
+				return
+			}
+		}
+
 		// Update our data in remote to sync with what we imported
 		localSource.ID = source.ID
-		s, err := r.client.UpdateSource(localSource)
+		s, err := r.client.UpdateSource(ctx, localSource)
 		if err != nil {
 			resp.Diagnostics.AddError(
 				"Unable to Sync Existing Resource",
@@ -198,7 +213,7 @@ func (r *SourceResource) Read(ctx context.Context, req resource.ReadRequest, res
 	}
 
 	// Fetch our remote data
-	source, err := r.client.GetSourceByID(data.ID.ValueString())
+	source, err := r.client.GetSourceByID(ctx, data.ID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to fetch source by ID", err.Error())
 		return
@@ -216,8 +231,8 @@ func (r *SourceResource) Read(ctx context.Context, req resource.ReadRequest, res
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-func updateSourceEnabledAttribute(client *ImgixClient, sourceID string, enabled bool) error {
-	_, err := client.UpdateSource(&ImgixSource{ID: sourceID, Enabled: &enabled})
+func updateSourceEnabledAttribute(ctx context.Context, client *ImgixClient, sourceID string, enabled bool) error {
+	_, err := client.UpdateSource(ctx, &ImgixSource{ID: sourceID, Enabled: &enabled})
 	return err
 }
 
@@ -275,7 +290,7 @@ func (r SourceResource) Update(ctx context.Context, req resource.UpdateRequest, 
 
 	// We need to enable the source first, then update attributes because Imgix doesn't allow updates to a disabled source
 	if shouldUpdateThenEnable {
-		err := updateSourceEnabledAttribute(r.client, source.ID, true)
+		err := updateSourceEnabledAttribute(ctx, r.client, source.ID, true)
 		if err != nil {
 			resp.Diagnostics.AddError(
 				"Unable to Enable Resource",
@@ -299,7 +314,7 @@ func (r SourceResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	}
 
 	// Update our data in remote
-	_, err := r.client.UpdateSource(source)
+	_, err := r.client.UpdateSource(ctx, source)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Unable to Update Resource",
@@ -312,7 +327,7 @@ func (r SourceResource) Update(ctx context.Context, req resource.UpdateRequest, 
 
 	// Now that we've update the attributes, we can disable the source
 	if shouldUpdateThenDisable {
-		err := updateSourceEnabledAttribute(r.client, source.ID, false)
+		err := updateSourceEnabledAttribute(ctx, r.client, source.ID, false)
 		if err != nil {
 			resp.Diagnostics.AddError(
 				"Unable to Enable Resource",
@@ -325,7 +340,7 @@ func (r SourceResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	}
 
 	// Fetch our remote data again to be safe
-	source, err = r.client.GetSourceByID(plan.ID.ValueString())
+	source, err = r.client.GetSourceByID(ctx, plan.ID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to fetch source by ID", err.Error())
 		return
@@ -361,7 +376,7 @@ func (r SourceResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 	}
 
 	// Delete the resource
-	err := r.client.DeleteSourceByID(data.ID.ValueString())
+	err := r.client.DeleteSourceByID(ctx, data.ID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Unable to Delete Resource",

@@ -2,7 +2,7 @@ package internal
 
 import (
 	"bytes"
-	"crypto/tls"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -62,13 +62,11 @@ type ImgixClient struct {
 }
 
 func NewImgixClient(authToken string, upsertByName bool) *ImgixClient {
-	cr := http.DefaultTransport.(*http.Transport).Clone()
-	cr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	client := &http.Client{
 		Timeout: time.Second * 30,
 		Transport: AuthenticatedRateLimitedTransport{
-			roundTripper: cr,
-			rateLimiter:  rate.NewLimiter(rate.Every(1*time.Second), 1), // 1 request(s) per second
+			roundTripper: http.DefaultTransport,
+			rateLimiter:  rate.NewLimiter(rate.Every(2*time.Second), 1), // 1 request(s) every 2 seconds
 			token:        authToken,
 		},
 	}
@@ -93,7 +91,7 @@ func (mrt AuthenticatedRateLimitedTransport) RoundTrip(r *http.Request) (*http.R
 	return mrt.roundTripper.RoundTrip(r)
 }
 
-func (c *ImgixClient) GetSourceByID(resourceId string) (*ImgixSource, error) {
+func (c *ImgixClient) GetSourceByID(ctx context.Context, resourceId string) (*ImgixSource, error) {
 	source := new(ImgixSource)
 	if resourceId == "" {
 		return source, fmt.Errorf("missing resourceId, can't call GetSourceByID")
@@ -121,7 +119,7 @@ func (c *ImgixClient) GetSourceByID(resourceId string) (*ImgixSource, error) {
 	return source, nil
 }
 
-func (c *ImgixClient) GetSourceByName(sourceName string) (*ImgixSource, error) {
+func (c *ImgixClient) GetSourceByName(ctx context.Context, sourceName string) (*ImgixSource, error) {
 	if sourceName == "" {
 		return nil, fmt.Errorf("missing sourceName, can't call GetSourceByName")
 	}
@@ -153,7 +151,7 @@ func (c *ImgixClient) GetSourceByName(sourceName string) (*ImgixSource, error) {
 	return nil, fmt.Errorf("more than one source was found with name: %s; can't import", sourceName)
 }
 
-func (c *ImgixClient) CreateSource(source *ImgixSource) (*ImgixSource, error) {
+func (c *ImgixClient) CreateSource(ctx context.Context, source *ImgixSource) (*ImgixSource, error) {
 	payload, err := jsonapi.Marshal(source)
 	if err != nil {
 		return source, err
@@ -186,7 +184,7 @@ func (c *ImgixClient) CreateSource(source *ImgixSource) (*ImgixSource, error) {
 	return remoteSource, nil
 }
 
-func (c *ImgixClient) UpdateSource(source *ImgixSource) (*ImgixSource, error) {
+func (c *ImgixClient) UpdateSource(ctx context.Context, source *ImgixSource) (*ImgixSource, error) {
 	if source.ID == "" {
 		return nil, fmt.Errorf("missing ID, can't call UpdateSource")
 	}
@@ -227,7 +225,7 @@ func (c *ImgixClient) UpdateSource(source *ImgixSource) (*ImgixSource, error) {
 	return remoteSource, nil
 }
 
-func (c *ImgixClient) DeleteSourceByID(resourceId string) error {
+func (c *ImgixClient) DeleteSourceByID(ctx context.Context, resourceId string) error {
 	if resourceId == "" {
 		return fmt.Errorf("missing resourceId, can't call DeleteSourceByID")
 	}

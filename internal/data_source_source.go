@@ -118,7 +118,7 @@ func (d *SourceDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 	data.Deployment = deployment
 
 	// Fetch our remote data
-	source, err := d.client.GetSourceByID(data.ID.ValueString())
+	source, err := d.client.GetSourceByID(ctx, data.ID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to fetch source by ID", err.Error())
 		return
